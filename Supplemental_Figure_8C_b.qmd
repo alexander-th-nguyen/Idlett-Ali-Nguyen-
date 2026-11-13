@@ -1,0 +1,94 @@
+## Setup
+
+```{r, results = "hide", results = "hide", message = FALSE, warning = FALSE}
+# Packages
+library(conflicted)
+library(forcats)
+library(stringr)
+library(dplyr)
+library(tibble)
+library(ggplot2)
+library(patchwork)
+library(SummarizedExperiment)
+library(msigdbr)
+conflicts_prefer(base::setdiff)
+```
+
+## GSEA - GOBP
+
+### `gsea.res`
+
+```{r}
+dge <- readRDS("Replacing_with_your_file_path")
+organism <- "Mus musculus"
+seed <- 7788
+
+# ================================================================================
+
+dge <- dge |> dplyr::filter(!is.na(dge$gene))
+dge <- dge |> dplyr::filter(!duplicated(dge$gene))
+dge <- dge |> dplyr::filter(!is.na(dge$logFC))
+
+stopifnot(exprs = {
+  !any(is.na(dge$gene))
+  !any(duplicated(dge$gene))
+  !any(is.na(dge$logFC))
+})
+
+dge <- dge |> dplyr::arrange(desc(logFC))
+fc.symbol <- dge |> dplyr::pull(logFC, gene)
+
+pathways <- msigdbr::msigdbr_collections()
+paths.gobp <- msigdbr::msigdbr(
+  species = "Mus musculus",
+  category = "C5",
+  subcategory = "GO:BP"
+) |>
+  dplyr::select(gs_name, gene_symbol) |>
+  dplyr::mutate(gs_name = sub("^GOBP_", "", gs_name)) |>
+  dplyr::mutate(gs_name = gsub("_", " ", gs_name))
+
+set.seed(seed)
+gsea.res <- clusterProfiler::GSEA(
+  geneList = fc.symbol,
+  TERM2GENE = paths.gobp,
+  minGSSize = 10,
+  maxGSSize = 500,
+  eps = 0,
+  pvalueCutoff = 1,
+  pAdjustMethod = "BH",
+  by = "fgsea",
+  nPermSimple = 100000
+)
+```
+
+### Enrichment map - q < 0.10
+
+```{r}
+emap.in <- gsea.res |>
+  dplyr::filter(qvalue < 0.10) |>
+  enrichplot::pairwise_termsim()
+
+p1 <- enrichplot::emapplot(
+  x = emap.in,
+  repel = TRUE,
+  showCategory = Inf,
+  color = "NES",
+  size_category = 1, # Make all dots bigger or smaller, 1 = default
+  edge.params = list(min = 0.2),
+  color_edge = "grey",
+  size_edge = 0.5,
+  node_label = c("category", "group", "all", "none")[1],
+  pie = "equal",
+  group_style = c("ggforce", "polygon")[1],
+  cluster.params = list(method = stats::kmeans, label_words_n = 4)
+) +
+  scale_color_gradient2(
+    low = "#0000FF",
+    mid = "#FFFFFF",
+    high = "#FF0000"
+  ) +
+  labs(
+    title = "GOBP pathways, q < 0.10"
+  )
+```
